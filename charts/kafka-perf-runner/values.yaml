@@ -1,0 +1,39 @@
+image:
+  repository: kafka-perf-runner
+  tag: latest
+  pullPolicy: IfNotPresent
+
+bootstrapServers: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
+
+runner:
+  phase: all
+  replicationFactor: 3
+  duration: 600
+  messageSize: 1024
+  extraArgs: []
+
+artifacts:
+  pvcName: ""
+  mountPath: /workspace/artifacts
+
+clientConfigSecret: ""
+clientConfigKey: client.properties
+commandConfigSecret: ""
+commandConfigKey: admin.properties
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+restartPolicy: Never
+
+annotations: {}
+labels: {}
+

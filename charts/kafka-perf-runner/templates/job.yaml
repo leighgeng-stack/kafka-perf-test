@@ -1,0 +1,94 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kafka-perf-runner.fullname" . }}
+  labels:
+    {{- include "kafka-perf-runner.labels" . | nindent 4 }}
+  {{- with .Values.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "kafka-perf-runner.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kafka-perf-runner.serviceAccountName" . }}
+      restartPolicy: {{ .Values.restartPolicy }}
+      containers:
+        - name: runner
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          workingDir: /workspace/runners/cli
+          command:
+            - /bin/bash
+            - -c
+          args:
+            - >
+              ./scripts/run_baseline.sh
+              --bootstrap {{ .Values.bootstrapServers }}
+              --phase {{ .Values.runner.phase }}
+              --replication-factor {{ .Values.runner.replicationFactor }}
+              --duration {{ .Values.runner.duration }}
+              --message-size {{ .Values.runner.messageSize }}
+              {{- if .Values.clientConfigSecret }}
+              --client-config /config/client/{{ .Values.clientConfigKey }}
+              {{- end }}
+              {{- if .Values.commandConfigSecret }}
+              --command-config /config/admin/{{ .Values.commandConfigKey }}
+              {{- end }}
+              {{- range .Values.runner.extraArgs }}
+              {{ . }}
+              {{- end }}
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: "{{ .Values.bootstrapServers }}"
+          volumeMounts:
+            - name: artifacts
+              mountPath: {{ .Values.artifacts.mountPath }}
+          {{- if .Values.clientConfigSecret }}
+            - name: client-config
+              mountPath: /config/client
+              readOnly: true
+          {{- end }}
+          {{- if .Values.commandConfigSecret }}
+            - name: command-config
+              mountPath: /config/admin
+              readOnly: true
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: artifacts
+          {{- if .Values.artifacts.pvcName }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.artifacts.pvcName }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- if .Values.clientConfigSecret }}
+        - name: client-config
+          secret:
+            secretName: {{ .Values.clientConfigSecret }}
+      {{- end }}
+      {{- if .Values.commandConfigSecret }}
+        - name: command-config
+          secret:
+            secretName: {{ .Values.commandConfigSecret }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+

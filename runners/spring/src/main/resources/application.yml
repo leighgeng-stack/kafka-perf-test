@@ -1,0 +1,28 @@
+spring:
+  main:
+    web-application-type: none
+
+baseline:
+  bootstrap-servers: ${BOOTSTRAP_SERVERS:localhost:9092}
+  artifacts-dir: ${ARTIFACTS_DIR:/workspace/artifacts}
+  warmup-seconds: 120
+  duration-seconds: 600
+  message-size: 1024
+  replication-factor: 3
+  phases:
+    - name: single
+      topic: baseline-1p
+      partitions: 1
+      target-throughput: 20000
+      consumer-threads: 1
+    - name: multi
+      topic: baseline-12p
+      partitions: 12
+      target-throughput: 240000
+      consumer-threads: 6
+    - name: app
+      topic: baseline-app
+      partitions: 12
+      target-throughput: 240000
+      consumer-threads: 6
+

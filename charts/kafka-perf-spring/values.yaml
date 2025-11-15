@@ -1,0 +1,30 @@
+image:
+  repository: kafka-perf-spring
+  tag: latest
+  pullPolicy: IfNotPresent
+
+bootstrapServers: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
+artifacts:
+  pvcName: ""
+  mountPath: /workspace/artifacts
+
+baseline:
+  warmupSeconds: 120
+  durationSeconds: 600
+  messageSize: 1024
+  replicationFactor: 3
+  phases: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+restartPolicy: Never
+annotations: {}
+labels: {}
+

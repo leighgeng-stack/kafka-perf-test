@@ -1,0 +1,7 @@
+apiVersion: v2
+name: kafka-perf-spring
+description: Spring Kafka baseline runner deployed as a Kubernetes Job.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+

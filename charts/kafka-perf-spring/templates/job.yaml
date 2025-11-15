@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kafka-perf-spring.fullname" . }}
+  labels:
+    {{- include "kafka-perf-spring.labels" . | nindent 4 }}
+  {{- with .Values.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "kafka-perf-spring.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kafka-perf-spring.serviceAccountName" . }}
+      restartPolicy: {{ .Values.restartPolicy }}
+      containers:
+        - name: spring-runner
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: "{{ .Values.bootstrapServers }}"
+            - name: ARTIFACTS_DIR
+              value: "{{ .Values.artifacts.mountPath }}"
+            {{- if .Values.baseline.phases }}
+            - name: SPRING_APPLICATION_JSON
+              value: {{ dict "baseline" (dict "phases" .Values.baseline.phases) | toJson | quote }}
+            {{- end }}
+          args:
+            - --baseline.bootstrap-servers={{ .Values.bootstrapServers }}
+            - --baseline.warmup-seconds={{ .Values.baseline.warmupSeconds }}
+            - --baseline.duration-seconds={{ .Values.baseline.durationSeconds }}
+            - --baseline.message-size={{ .Values.baseline.messageSize }}
+            - --baseline.replication-factor={{ .Values.baseline.replicationFactor }}
+          volumeMounts:
+            - name: artifacts
+              mountPath: {{ .Values.artifacts.mountPath }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: artifacts
+          {{- if .Values.artifacts.pvcName }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.artifacts.pvcName }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
