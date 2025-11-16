@@ -324,7 +324,7 @@ sequenceDiagram
     Admin-->>Script: Topic ready
 
     Note over Producer,Consumer: Warmup then steady-state windows
-    Script->>Producer: Start producer (app-like tuning; same durable semantics)
+    Script->>Producer: Start producer (app-like tuning, same durable semantics)
     Producer-->>Artifacts: producer.log
 
     Script->>Consumer: Start consumer (threads=6, expectedRecords)
