@@ -29,9 +29,9 @@ kubectl -n kafka-perf-test logs job/kafka-baseline-cli-kafka-perf-runner -f
 
 ### Re-run cleanly
 ```bash
-kubectl -n kafka-perf-test delete job kafka-baseline-cli || true
+kubectl -n kafka-perf-test delete job kafka-baseline-cli-kafka-perf-runner  || true
 helm upgrade --install kafka-baseline-cli charts/kafka-perf-runner -n kafka-perf-test --reuse-values
-kubectl -n kafka-perf-test patch job kafka-baseline-cli -p '{"spec":{"suspend":false}}'
+kubectl -n kafka-perf-test patch job kafka-baseline-cli-kafka-perf-runner  -p '{"spec":{"suspend":false}}'
 ```
 
 ### Collect artifacts
