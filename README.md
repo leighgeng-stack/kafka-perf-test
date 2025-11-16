@@ -87,38 +87,11 @@ Pick the runner that matches your environment, then collect artifacts either fro
 
 ---
 
-### Deploy the CLI Runner via Helm
-
-Use `charts/kafka-perf-runner` when you want to run the perf-test CLI inside a cluster (e.g., namespace `kafka-perf-test`) against a Strimzi-managed Kafka endpoint.
-
-1. **Build and push the image (includes scripts + Kafka CLI).**
-   ```bash
-   docker build -t registry.example.com/kafka-perf-runner:latest -f runners/cli/docker/Dockerfile .
-   docker push registry.example.com/kafka-perf-runner:latest
-   ```
-2. **Install the chart (creates a one-shot Job).**
-   ```bash
-   helm install kafka-baseline charts/kafka-perf-runner \
-     --namespace kafka-perf-test --create-namespace \
-     --set image.repository=registry.example.com/kafka-perf-runner \
-     --set image.tag=latest \
-     --set bootstrapServers=my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092 \
-     --set runner.phase=all \
-     --set runner.replicationFactor=3
-   ```
-3. **Optional settings**
-   - `--set artifacts.pvcName=<pvc>` to persist `artifacts/summary_latest.md` and log files.
-   - `--set runner.duration=600`, `runner.messageSize=4096`, etc. to override defaults.
-   - `--set clientConfigSecret` / `commandConfigSecret` to mount SASL/SSL configs from Kubernetes secrets.
-
-The Job uses the same `runners/cli/scripts/run_baseline.sh` entry point and logs to `/workspace/artifacts` inside the pod. Fetch results via `kubectl logs job/kafka-baseline` or by downloading the PVC contents.
-
-- **Collecting summaries in Kubernetes**  
-  - Tail the job logs for the CLI runner to see the perf-test output in real time:  
-    `kubectl logs job/kafka-baseline` (look for lines such as `14400000 records sent, 19999.777780 records/sec (19.53 MB/sec), 1.26 ms avg latency, 259.00 ms max latency, 1 ms 50th, 4 ms 95th, 5 ms 99th, 10 ms 99.9th`).  
-  - If you mounted a PVC, copy the aggregated Markdown/JSON summaries back with `kubectl cp kafka-perf-test/<pod>:/workspace/artifacts ./artifacts-k8s`.
-
----
+### Documentation
+- Run locally to verify the workflow: `docs/running-locally.md`
+- Run in Kubernetes with Helm: `docs/kubernetes-helm.md`
+- Simulate multi-topic workloads (multiple CLI jobs): `docs/multi-topic-workloads.md`
+- Baseline design and methodology: `docs/kafka-baseline-perf.md`
 
 ### Script Options
 
@@ -135,42 +108,7 @@ Flags:
   --dry-run                     # print commands only
 ```
 
-### Run it locally to verify the workflow
-```bash
-# CLI (script) runner: single phase example
-docker compose run --rm perf-runner \
-  ./runners/cli/scripts/run_baseline.sh --bootstrap kafka:9094 --phase single --replication-factor 1
-
-# Spring runner: single phase example
-docker compose run --rm spring-runner \
-  --baseline.bootstrap-servers=kafka:9094 \
-  --baseline.phases[0].name=single \
-  --baseline.replication-factor=1
-
-# Spring runner: low-load smoke test (quotes avoid zsh globbing on [] args)
-docker compose run --rm spring-runner \
-  --baseline.bootstrap-servers=kafka:9094 \
-  --baseline.duration-seconds=45 \
-  --baseline.replication-factor=1 \
-  '--baseline.phases[0].name=single' \
-  '--baseline.phases[0].topic=baseline-1p' \
-  '--baseline.phases[0].partitions=1' \
-  '--baseline.phases[0].target-throughput=500' \
-  '--baseline.phases[0].consumer-threads=1'
-
-# CLI (script) runner: all phases example
-docker compose run --rm perf-runner \
-  ./runners/cli/scripts/run_baseline.sh \
-    --bootstrap kafka:9094 \
-    --phase all \
-    --replication-factor 1
-
-# Spring runner: all phases example
-docker compose run --rm spring-runner \
-  --baseline.bootstrap-servers=kafka:9094 \
-  --baseline.replication-factor=1
-```
-Set `BOOTSTRAP_SERVERS` env var to avoid passing `--bootstrap` explicitly. When using Compose, mount any custom config files under the repo so the container can read them (they appear under `/workspace/...`).
+For Docker Compose examples, see `docs/running-locally.md`. Set `BOOTSTRAP_SERVERS` env var to avoid passing `--bootstrap` explicitly. When using Compose, mount any custom config files under the repo so the container can read them (they appear under `/workspace/...`).
 
 ---
 
@@ -231,8 +169,6 @@ Both runners now default each phase to **12 partitions** (single, multi, and app
         consumerThreads: 1
   ```
 
----
-
 ### Interpreting Results
 
 - Throughput (`records/sec`, `MB/sec`) prints every 10 s in `producer.log`.
@@ -241,7 +177,7 @@ Both runners now default each phase to **12 partitions** (single, multi, and app
 - Each phase now emits `summary.json` containing parsed producer/consumer stats; once all selected phases finish, the script writes an aggregated Markdown table to `artifacts/summary_latest.md` for quick CLI reporting.
 - The Spring runner mirrors the JSON summaries (directories suffixed with `_spring`) and logs consumer latency stats directly from the application.
 
-For the rationale behind each phase and the metrics to track, see the design doc in `docs/kafka-baseline-perf.md`.
+For the rationale behind each phase and the metrics to track, see `docs/kafka-baseline-perf.md`.
 
 ---
 
@@ -380,13 +316,7 @@ Collected outputs:
 
 Use the CLI runner for fast, portable checks and the Spring runner when you want end-to-end behavior close to application services. Running both provides confidence that broker-side capacity translates to app-observable performance.
 
----
-
-### Deploying in Kubernetes with Helm
-
-You can deploy **both the CLI runner and the Spring runner** in your Kubernetes cluster using Helm. Build and push your custom images locally, then use Helm charts to launch the jobs with your overrides.
-
-#### Using GitLab CI/CD
+### Deploying in Kubernetes with Helm (CI)
 
 The repository includes a `.gitlab-ci.yml` that automates building and pushing images to Nexus, and optionally deploying via Helm. Required GitLab CI/CD variables:
 
@@ -436,86 +366,7 @@ docker push $NEXUS_REGISTRY/kafka-perf/kafka-perf-spring:v1.0.0
 docker push $NEXUS_REGISTRY/kafka-perf/kafka-perf-spring:latest
 ```
 
-#### For Remote Kubernetes Clusters
+For full Kubernetes/Helm usage, see `docs/kubernetes-helm.md`.
 
-2. **Install the runner (do not start yet)**
-   Install the Helm chart with the Job suspended, so it will not run immediately:
-   ```bash
-   # CLI Runner (suspended)
-   helm install kafka-baseline-cli charts/kafka-perf-runner \
-     --namespace kafka-perf-test --create-namespace \
-     --set image.repository=$NEXUS_REGISTRY/kafka-perf/kafka-perf-runner \
-     --set image.tag=latest \
-     --set bootstrapServers=my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092 \
-     --set runner.phase=all \
-     --set suspend=true
-   
-   # Spring Runner (suspended)
-   helm install kafka-baseline-spring charts/kafka-perf-spring \
-     --namespace kafka-perf-test --create-namespace \
-     --set image.repository=$NEXUS_REGISTRY/kafka-perf/kafka-perf-spring \
-     --set image.tag=latest \
-     --set imagePullSecrets[0].name=nxregsecret \
-     --set bootstrapServers=my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092 \
-     --set baseline.durationSeconds=300 \
-     --set suspend=true
-   ```
-
-   If your Nexus is private, create the pull secret first:
-   ```bash
-   kubectl create namespace kafka-perf-test --dry-run=client -o yaml | kubectl apply -f -
-   kubectl -n kafka-perf-test create secret docker-registry nxregsecret \
-     --docker-server="$NEXUS_REGISTRY" \
-     --docker-username="$NEXUS_USER" \
-     --docker-password="$NEXUS_PASSWORD" \
-     --docker-email="$CI_REGISTRY_USER_EMAIL"
-   ```
-3. **Trigger the test manually (kubectl), similar to docker compose run --rm**
-   Un-suspend the Job to start a one-shot run:
-   ```bash
-   # Start CLI run
-   kubectl -n kafka-perf-test patch job kafka-baseline-cli-kafka-perf-runner -p '{"spec":{"suspend":false}}'
-
-   # Watch the log
-   kubectl -n kafka-perf-test logs job/kafka-baseline-cli-kafka-perf-runner -f
-   
-   # Start Spring run
-   kubectl -n kafka-perf-test patch job kafka-baseline-spring -p '{"spec":{"suspend":false}}'
-
-   # Watch the log
-   kubectl -n kafka-perf-test logs job/kafka-baseline-spring -f
-   ```
-
-   After the Job completes, artifacts will be under the configured `artifacts/` path.
-
-4. **Re-run the test (clean like --rm)**
-   Delete the completed Job and recreate it (staying suspended until you trigger again):
-   ```bash
-   # Delete Jobs
-   kubectl -n kafka-perf-test delete job kafka-baseline-cli || true
-   kubectl -n kafka-perf-test delete job kafka-baseline-spring || true
-   
-   # Recreate (reuse previous values), still suspended
-   helm upgrade --install kafka-baseline-cli charts/kafka-perf-runner \
-     -n kafka-perf-test --reuse-values
-   helm upgrade --install kafka-baseline-spring charts/kafka-perf-spring \
-     -n kafka-perf-test --reuse-values
-   
-   # Trigger when ready
-   kubectl -n kafka-perf-test patch job kafka-baseline-cli -p '{"spec":{"suspend":false}}'
-   # or
-   kubectl -n kafka-perf-test patch job kafka-baseline-spring -p '{"spec":{"suspend":false}}'
-   ```
-
-If you prefer to have the Job start immediately on install, set `--set suspend=false` (default).
-
-#### Collecting Artifacts
-
-Artifacts for both runners are saved under the mounted `artifacts/` path and can be collected from the pod or PVC after job completion:
-
-- **Inspect job logs**: `kubectl logs job/kafka-baseline-cli` or `kubectl logs job/kafka-baseline-spring`
-- **Copy artifacts from pod**: `kubectl cp kafka-perf-test/<pod-name>:/workspace/artifacts ./artifacts-k8s`
-- **Download from PVC**: If you mounted a PVC, access it through the storage class or copy files directly
-
-For more customization, update the respective `values.yaml` file or add more Helm CLI `--set` arguments as needed.
+For concurrent multi-size jobs, see `docs/multi-topic-workloads.md`.
 

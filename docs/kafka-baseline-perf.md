@@ -1,7 +1,7 @@
 ## Kafka Baseline Load Testing Design Document
 
 **Document purpose**  
-Codifies the reusable baseline methodology for measuring raw Kafka cluster throughput and latency, detached from application code. Implementation details (Docker tooling, scripts, configs) live in the repository root; operational instructions are summarized in `README.md`.
+Codifies the reusable baseline methodology for measuring raw Kafka cluster throughput and latency, detached from application code. Implementation details (Docker tooling, scripts, configs) live in the repository; operational instructions are split into focused docs (`docs/running-locally.md`, `docs/kubernetes-helm.md`, `docs/multi-topic-workloads.md`) and are linked from `README.md`.
 
 This document instantiates the reusable baseline design with Apache Kafka’s native benchmarking utilities: `kafka-producer-perf-test.sh` and `kafka-consumer-perf-test.sh`. It keeps Kafka isolated from any business logic so you can establish raw cluster ceilings before layering application code.
 
@@ -12,7 +12,7 @@ This document instantiates the reusable baseline design with Apache Kafka’s na
 | Rule | Implementation Detail |
 |------|-----------------------|
 | **Isolate Kafka** | Run all tests from jump-hosts that have direct broker access; disable REST/DB/Kafka Connect dependencies. |
-| **One topic per run** | Re-create topics between phases to avoid cross-test data. |
+| **One topic per phase (baseline)** | Use a single topic per phase to isolate variables and keep results comparable; re-create topics between phases to avoid cross-test data. |
 | **Simple producer → consumer loop** | Use perf-test CLI pair for pure Kafka throughput & latency signals. |
 | **Controlled variables** | Fix payload size (1 KB JSON), compression (snappy), acks (all), batching (`batch.size=16384`, `linger.ms=5`). |
 | **Steady-state** | 2–3 min warm-up, then capture 10 min of metrics per phase. |
@@ -28,7 +28,13 @@ This document instantiates the reusable baseline design with Apache Kafka’s na
 
 ---
 
-### 3. Standard Message Template
+### 3. Defaults and Message Template
+
+Defaults across runners (can be overridden):
+- Partitions per phase: 12 (`baseline-1p`, `baseline-12p`, `baseline-app`)
+- Replication factor: 3 (use 1 for local single-broker Compose smoke tests)
+- Consumer threads: 1 (single), 6 (multi/app)
+- Producer semantics: `acks=all`, idempotence enabled, snappy compression, `linger.ms=5`, `batch.size=16384`
 
 The perf-test producer will generate random bytes, but for auditability tie runs to the canonical JSON payload (~1 KB):
 
@@ -127,7 +133,7 @@ For latency histograms beyond what the CLI prints, run periodic `kafka-consumer-
 
 ---
 
-### 7. Sequential Test Phases
+### 7. Sequential Test Phases (Baseline)
 
 | Phase | Topic | Partitions | Producer Command | Consumer Command | Notes |
 |-------|-------|------------|------------------|------------------|-------|
@@ -135,7 +141,7 @@ For latency histograms beyond what the CLI prints, run periodic `kafka-consumer-
 | **Multi-Partition** | `baseline-12p` | 12 | Keep same producer config; increase `NUM_RECORDS` proportionally. | `--threads 6`–12. | Expect near-linear scaling; watch broker network. |
 | **App Consumer** | `baseline-app` | 6–12 | Still use perf producer to fill topic quickly. | Replace perf consumer with real app consumer or wrapper script to compare latency vs baseline. | Validates app stack overhead. |
 
-Each phase: warm-up 2 min, then capture 10 min steady state metrics (producer stdout, consumer stdout, broker telemetry).
+Each phase: warm-up 2 min, then capture 10 min steady state metrics (producer stdout, consumer stdout, broker telemetry). The CLI and Spring runners both emit per-phase `summary.json` and an aggregated Markdown table.
 
 ---
 
@@ -169,9 +175,14 @@ Plan broker storage accordingly. If disk is limited, shorten `--duration`, lower
 
 ---
 
-### 9. Operational Runbook (Summary)
+### 10. Operational Runbook (Summary)
 
-Operational procedures (Docker Compose setup, script flags, artifact handling) are covered in `README.md`. At a glance:
+Operational procedures are organized as follows:
+- Local runs and Docker Compose: `docs/running-locally.md`
+- Kubernetes/Helm usage: `docs/kubernetes-helm.md`
+- Concurrent jobs to simulate multi-topic workloads: `docs/multi-topic-workloads.md`
+
+At a glance:
 
 - Use the tooling container (`docker-compose.yml`) to avoid managing Kafka CLI locally.
 - Run `runners/cli/scripts/run_baseline.sh` with `--phase` / `--duration` / `--message-size` overrides as needed. For single-node Compose smoke tests, prefer `--phase single --replication-factor 1` (one partition, ISR 1). When targeting the Strimzi-managed cluster, switch back to `--phase all --replication-factor 3` so multi-partition topics match production expectations.
@@ -180,11 +191,11 @@ Operational procedures (Docker Compose setup, script flags, artifact handling) a
 - Supply optional `--client-config` and `--command-config` files for secure clusters; the script merges them with `runners/cli/config/baseline-consumer.properties` before launching the benchmark clients.
 - Artifacts are persisted under `artifacts/<timestamp>_<phase>/producer.log|consumer.log`.
 
-Refer to the README for exact commands and customization examples; the remainder of this design doc focuses on the why and what to measure.
+Refer to the linked docs for exact commands and customization examples; the remainder of this design doc focuses on the why and what to measure.
 
 ---
 
-### 10. Automation Template (YAML)
+### 11. Automation Template (YAML)
 
 ```yaml
 test_name: kafka_baseline
@@ -226,7 +237,7 @@ Feed this YAML into automation (Ansible, Jenkins, custom Python) to drive the pe
 
 ---
 
-### 11. Reusable Prompt
+### 12. Reusable Prompt
 
 > Generate a Kafka baseline load test with N partitions, 1 KB JSON messages (`id`, `ts`, `data`), snappy compression, `acks=all`, 10 min runtime, report throughput every 10 s, and compute p50/p95/p99 latency using consumer timestamps.
 
