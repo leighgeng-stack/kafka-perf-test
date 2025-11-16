@@ -80,16 +80,10 @@ deploy:
   script:
     - if helm ls -n $TARGET_NAMESPACE | grep -q $TARGET_APP_NAME; then
         echo "Upgrading the existing release...";
-        helm upgrade $TARGET_APP_NAME charts/kafka-perf-runner -n $TARGET_NAMESPACE \
-          --set image.repository=$CI_REGISTRY_IMAGE_CLI \
-          --set image.tag=$CI_COMMIT_TAG \
-          --set bootstrapServers=$KAFKA_BOOTSTRAP_SERVERS;
+        helm upgrade $TARGET_APP_NAME charts/kafka-perf-runner -n $TARGET_NAMESPACE --set image.repository=$CI_REGISTRY_IMAGE_CLI --set image.tag=$CI_COMMIT_TAG --set bootstrapServers=$KAFKA_BOOTSTRAP_SERVERS --set suspend=true;
       else
         echo "Installing a new release...";
-        helm install $TARGET_APP_NAME charts/kafka-perf-runner -n $TARGET_NAMESPACE \
-          --set image.repository=$CI_REGISTRY_IMAGE_CLI \
-          --set image.tag=$CI_COMMIT_TAG \
-          --set bootstrapServers=$KAFKA_BOOTSTRAP_SERVERS;
+        helm install $TARGET_APP_NAME charts/kafka-perf-runner -n $TARGET_NAMESPACE --set image.repository=$CI_REGISTRY_IMAGE_CLI --set image.tag=$CI_COMMIT_TAG --set bootstrapServers=$KAFKA_BOOTSTRAP_SERVERS --set suspend=true;
       fi
   rules:
     - if: $CI_COMMIT_TAG =~ /^v(?:\d+.){2}(?:\d+)$/
