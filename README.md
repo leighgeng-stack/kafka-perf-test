@@ -245,6 +245,143 @@ For the rationale behind each phase and the metrics to track, see the design doc
 
 ---
 
+### CLI Runner Sequence Diagrams
+
+The following Mermaid sequence diagrams illustrate how the CLI runner orchestrates each phase. All phases follow the same high-level flow: create topic → run producer perf → run consumer perf → emit artifacts (logs and summaries). Defaults: partitions per phase = 12; consumer threads = 1 (single) or 6 (multi/app).
+
+#### Phase: single
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Operator
+    participant Script as run_baseline.sh
+    participant Admin as kafka-topics.sh
+    participant Producer as kafka-producer-perf-test.sh
+    participant Consumer as kafka-consumer-perf-test.sh
+    participant Artifacts as artifacts/
+
+    Operator->>Script: Start phase "single" (bootstrap, duration, message-size, RF, etc.)
+    Script->>Admin: Create topic baseline-1p (partitions=12 default, replicationFactor)
+    Admin-->>Script: Topic ready
+
+    Note over Producer,Consumer: Warmup then steady-state windows
+    Script->>Producer: Start producer (targetThroughput, recordSize, acks=all, idempotence=true)
+    Producer-->>Artifacts: producer.log (10s throughput, latency metrics)
+
+    Script->>Consumer: Start consumer (threads=1, expectedRecords)
+    Consumer-->>Artifacts: consumer.log (throughput, fetch/latency stats)
+
+    Producer-->>Script: Exit with summary stats
+    Consumer-->>Script: Exit with summary stats
+    Script->>Artifacts: Write single/summary.json
+    Script->>Artifacts: Update summary_latest.md (aggregate)
+```
+
+#### Phase: multi
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Operator
+    participant Script as run_baseline.sh
+    participant Admin as kafka-topics.sh
+    participant Producer as kafka-producer-perf-test.sh
+    participant Consumer as kafka-consumer-perf-test.sh
+    participant Artifacts as artifacts/
+
+    Operator->>Script: Start phase "multi"
+    Script->>Admin: Create topic baseline-12p (partitions=12 default, replicationFactor)
+    Admin-->>Script: Topic ready
+
+    Note over Producer,Consumer: Warmup then steady-state windows
+    Script->>Producer: Start producer (parallel partitions, compression=snappy, linger/batch tuned)
+    Producer-->>Artifacts: producer.log
+
+    Script->>Consumer: Start consumer (threads=6, group.id=baseline-perf)
+    Consumer-->>Artifacts: consumer.log
+
+    Producer-->>Script: Exit with summary stats
+    Consumer-->>Script: Exit with summary stats
+    Script->>Artifacts: Write multi/summary.json
+    Script->>Artifacts: Update summary_latest.md (aggregate)
+```
+
+#### Phase: app
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Operator
+    participant Script as run_baseline.sh
+    participant Admin as kafka-topics.sh
+    participant Producer as kafka-producer-perf-test.sh
+    participant Consumer as kafka-consumer-perf-test.sh
+    participant Artifacts as artifacts/
+
+    Operator->>Script: Start phase "app"
+    Script->>Admin: Create topic baseline-app (partitions=12 default, replicationFactor)
+    Admin-->>Script: Topic ready
+
+    Note over Producer,Consumer: Warmup then steady-state windows
+    Script->>Producer: Start producer (app-like tuning; same durable semantics)
+    Producer-->>Artifacts: producer.log
+
+    Script->>Consumer: Start consumer (threads=6, expectedRecords)
+    Consumer-->>Artifacts: consumer.log
+
+    Producer-->>Script: Exit with summary stats
+    Consumer-->>Script: Exit with summary stats
+    Script->>Artifacts: Write app/summary.json
+    Script->>Artifacts: Update summary_latest.md (aggregate)
+```
+
+---
+
+### Baseline Design and Rationale
+
+This toolkit provides a repeatable, “good enough” baseline of Kafka cluster throughput and consumer latency using two complementary runners:
+
+- CLI runner: wraps Kafka’s native `kafka-producer-perf-test.sh` and `kafka-consumer-perf-test.sh`.
+- Spring runner: mirrors the workload with application-style producers/consumers.
+
+Core ideas:
+- Phased workload shape
+  - single: one topic sized for single-partition throughput and latency characterization.
+  - multi: a multi-partition topic to exercise parallelism and typical production fan-out.
+  - app: application-like topic with similar parallelism to multi but different tuning.
+- Topics per phase
+  - single → `baseline-1p`
+  - multi → `baseline-12p`
+  - app → `baseline-app`
+  - Default partitions per phase are 12; override with flags or Helm values to match real clusters.
+- Time windows
+  - Warmup (default 120s) lets producers/consumers stabilize and caches/JIT warm up.
+  - Steady state (default 600s) is long enough to average short spikes/dips.
+- Producer settings
+  - acks=all, idempotence=true to represent durable, production-typical semantics.
+  - modest batching/linger and snappy compression for realistic efficiency without hiding broker issues.
+- Consumer settings
+  - `kafka-consumer-perf-test.sh` runs with a fixed thread count (1 for single; 6 for multi/app).
+  - `group.id=baseline-perf`, `auto.offset.reset=earliest`, `enable.auto.commit=false`.
+  - The consumer reads exactly the expected message count and exits; output is parsed for summaries.
+
+Why this produces a solid baseline:
+- Repeatable: all parameters (partitions, replication, message size, duration, throughput) are explicit and versioned; both runners generate phase-scoped artifacts and a combined summary.
+- Representative: durable producer semantics and realistic batching/compression exercise broker I/O, replication, and controller behavior similar to production.
+- Comparable: identical phases across environments (local Docker/Compose, Kubernetes, managed Kafka) allow apples-to-apples comparisons over time and across clusters.
+- Sensitive to bottlenecks: multi-partition phases surface partition/replica placement, ISR/replication throughput, and disk/network limits; single-partition highlights broker/core latency.
+- Safe to tune: knobs (e.g., `--single-partitions`, `--multi-partitions`, `--message-size`, `--replication-factor`) allow adapting the baseline to cluster size without invalidating comparisons.
+
+Collected outputs:
+- Producer: records/sec, MB/sec, avg/max latency (from Kafka perf producer).
+- Consumer: throughput and fetch/latency stats (from perf consumer).
+- Summaries: per-phase `summary.json` and an aggregated `summary_latest.md` for quick review.
+
+Use the CLI runner for fast, portable checks and the Spring runner when you want end-to-end behavior close to application services. Running both provides confidence that broker-side capacity translates to app-observable performance.
+
+---
+
 ### Deploying in Kubernetes with Helm
 
 You can deploy **both the CLI runner and the Spring runner** in your Kubernetes cluster using Helm. Build and push your custom images locally, then use Helm charts to launch the jobs with your overrides.
