@@ -3,6 +3,8 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+imagePullSecrets: []
+
 bootstrapServers: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
 
 runner:
@@ -15,6 +17,7 @@ runner:
 artifacts:
   pvcName: ""
   mountPath: /workspace/artifacts
+  defaultPartitions: 12
 
 clientConfigSecret: ""
 clientConfigKey: client.properties
@@ -36,4 +39,6 @@ restartPolicy: Never
 
 annotations: {}
 labels: {}
+
+suspend: false
 

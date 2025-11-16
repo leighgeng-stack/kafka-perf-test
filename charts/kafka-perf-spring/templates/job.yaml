@@ -9,11 +9,16 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
+  suspend: {{ .Values.suspend }}
   template:
     metadata:
       labels:
         {{- include "kafka-perf-spring.labels" . | nindent 8 }}
     spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
       serviceAccountName: {{ include "kafka-perf-spring.serviceAccountName" . }}
       restartPolicy: {{ .Values.restartPolicy }}
       containers:

@@ -3,6 +3,8 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+imagePullSecrets: []
+
 bootstrapServers: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
 artifacts:
   pvcName: ""
@@ -20,6 +22,8 @@ serviceAccount:
   name: ""
   annotations: {}
 
+defaultPartitions: 12
+
 resources: {}
 nodeSelector: {}
 tolerations: []
@@ -27,4 +31,6 @@ affinity: {}
 restartPolicy: Never
 annotations: {}
 labels: {}
+
+suspend: false
 

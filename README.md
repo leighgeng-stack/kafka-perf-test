@@ -245,30 +245,140 @@ For the rationale behind each phase and the metrics to track, see the design doc
 
 ---
 
-### Deploy the Spring Runner via Helm
+### Deploying in Kubernetes with Helm
 
-When you need the application-style workload inside Kubernetes:
+You can deploy **both the CLI runner and the Spring runner** in your Kubernetes cluster using Helm. Build and push your custom images locally, then use Helm charts to launch the jobs with your overrides.
+
+#### Using GitLab CI/CD
+
+The repository includes a `.gitlab-ci.yml` that automates building and pushing images to Nexus, and optionally deploying via Helm. Required GitLab CI/CD variables:
+
+- `CI_REGISTRY_HOSTED` - Your Nexus registry URL (e.g., `registry.example.com`)
+- `CI_REGISTRY_USER` - Nexus username
+- `CI_REGISTRY_PASSWORD` - Nexus password
+- `CI_REGISTRY_USER_EMAIL` - Email for registry secret
+- `CI_REGISTRY_HUB` - Base registry for pulling CI images (e.g., `docker.io`)
+- `CI_WORKER_TAG` - GitLab runner tag
+- `KUBE_CONFIG_FILE` - Kubernetes config file path (for deploy stage)
+- `KAFKA_BOOTSTRAP_SERVERS` - Kafka bootstrap servers (for deploy stage)
+- `TARGET_PLATFORM` - Docker build platform (default `linux/amd64`; set to your cluster arch)
+
+The pipeline builds both runners and pushes them to `$CI_REGISTRY_HOSTED/kafka-perf/kafka-perf-runner` and `$CI_REGISTRY_HOSTED/kafka-perf/kafka-perf-spring` when you create a version tag matching `v*.*.*` (e.g., `v1.0.0`).
+
+Note: The CI uses Docker Buildx to build architecture-specific images (via `TARGET_PLATFORM`). If your cluster nodes are `arm64`, set `TARGET_PLATFORM=linux/arm64` in your CI/CD variables.
+#### Using CLI Script
+
+Alternatively, you can use the provided script to build and push images manually:
 
 ```bash
-docker build -t registry.example.com/kafka-perf-spring:latest -f runners/spring/docker/Dockerfile .
-docker push registry.example.com/kafka-perf-spring:latest
-
-helm install kafka-baseline-spring charts/kafka-perf-spring \
-  --namespace kafka-perf-test --create-namespace \
-  --set image.repository=registry.example.com/kafka-perf-spring \
-  --set image.tag=latest \
-  --set bootstrapServers=my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092
+export NEXUS_REGISTRY="registry.example.com"
+export NEXUS_USER="your-username"
+export NEXUS_PASSWORD="your-password"
+export VERSION_TAG="v1.0.0"  # optional, defaults to "latest"
+./scripts/push-to-nexus.sh
 ```
 
-Override Spring properties through Helm values / CLI arguments, for example:
+Or manually with Docker commands:
 
-- `--set baseline.durationSeconds=300`
-- `--set baseline.replicationFactor=3`
-- `--set baseline.phases[0].name=single --set baseline.phases[0].topic=baseline-1p ...` (values are serialized into `SPRING_APPLICATION_JSON` for the pod).
+```bash
+# Login to Nexus
+echo "$NEXUS_PASSWORD" | docker login -u "$NEXUS_USER" "$NEXUS_REGISTRY" --password-stdin
 
-Artifacts land under the mounted `artifacts/` path, mirroring the CLI runner structure (`summary.json`, metrics logs, etc.).
+# Build and push CLI runner
+docker build -f runners/cli/docker/Dockerfile . \
+  -t $NEXUS_REGISTRY/kafka-perf/kafka-perf-runner:v1.0.0 \
+  -t $NEXUS_REGISTRY/kafka-perf/kafka-perf-runner:latest
+docker push $NEXUS_REGISTRY/kafka-perf/kafka-perf-runner:v1.0.0
+docker push $NEXUS_REGISTRY/kafka-perf/kafka-perf-runner:latest
 
-- **Collecting summaries in Kubernetes**  
-  - Inspect the Spring job logs (`kubectl logs job/kafka-baseline-spring`) to see per-phase completion lines plus latency histograms.  
-  - Copy the `_spring` summary directories from the pod or PVC for offline analysis.
+# Build and push Spring runner
+docker build -f runners/spring/docker/Dockerfile . \
+  -t $NEXUS_REGISTRY/kafka-perf/kafka-perf-spring:v1.0.0 \
+  -t $NEXUS_REGISTRY/kafka-perf/kafka-perf-spring:latest
+docker push $NEXUS_REGISTRY/kafka-perf/kafka-perf-spring:v1.0.0
+docker push $NEXUS_REGISTRY/kafka-perf/kafka-perf-spring:latest
+```
+
+#### For Remote Kubernetes Clusters
+
+2. **Install the runner (do not start yet)**
+   Install the Helm chart with the Job suspended, so it will not run immediately:
+   ```bash
+   # CLI Runner (suspended)
+   helm install kafka-baseline-cli charts/kafka-perf-runner \
+     --namespace kafka-perf-test --create-namespace \
+     --set image.repository=$NEXUS_REGISTRY/kafka-perf/kafka-perf-runner \
+     --set image.tag=latest \
+     --set bootstrapServers=my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092 \
+     --set runner.phase=all \
+     --set suspend=true
+   
+   # Spring Runner (suspended)
+   helm install kafka-baseline-spring charts/kafka-perf-spring \
+     --namespace kafka-perf-test --create-namespace \
+     --set image.repository=$NEXUS_REGISTRY/kafka-perf/kafka-perf-spring \
+     --set image.tag=latest \
+     --set imagePullSecrets[0].name=nxregsecret \
+     --set bootstrapServers=my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092 \
+     --set baseline.durationSeconds=300 \
+     --set suspend=true
+   ```
+
+   If your Nexus is private, create the pull secret first:
+   ```bash
+   kubectl create namespace kafka-perf-test --dry-run=client -o yaml | kubectl apply -f -
+   kubectl -n kafka-perf-test create secret docker-registry nxregsecret \
+     --docker-server="$NEXUS_REGISTRY" \
+     --docker-username="$NEXUS_USER" \
+     --docker-password="$NEXUS_PASSWORD" \
+     --docker-email="$CI_REGISTRY_USER_EMAIL"
+   ```
+3. **Trigger the test manually (kubectl), similar to docker compose run --rm**
+   Un-suspend the Job to start a one-shot run:
+   ```bash
+   # Start CLI run
+   kubectl -n kafka-perf-test patch job kafka-baseline-cli-kafka-perf-runner -p '{"spec":{"suspend":false}}'
+
+   # Watch the log
+   kubectl -n kafka-perf-test logs job/kafka-baseline-cli-kafka-perf-runner -f
+   
+   # Start Spring run
+   kubectl -n kafka-perf-test patch job kafka-baseline-spring -p '{"spec":{"suspend":false}}'
+
+   # Watch the log
+   kubectl -n kafka-perf-test logs job/kafka-baseline-spring -f
+   ```
+
+   After the Job completes, artifacts will be under the configured `artifacts/` path.
+
+4. **Re-run the test (clean like --rm)**
+   Delete the completed Job and recreate it (staying suspended until you trigger again):
+   ```bash
+   # Delete Jobs
+   kubectl -n kafka-perf-test delete job kafka-baseline-cli || true
+   kubectl -n kafka-perf-test delete job kafka-baseline-spring || true
+   
+   # Recreate (reuse previous values), still suspended
+   helm upgrade --install kafka-baseline-cli charts/kafka-perf-runner \
+     -n kafka-perf-test --reuse-values
+   helm upgrade --install kafka-baseline-spring charts/kafka-perf-spring \
+     -n kafka-perf-test --reuse-values
+   
+   # Trigger when ready
+   kubectl -n kafka-perf-test patch job kafka-baseline-cli -p '{"spec":{"suspend":false}}'
+   # or
+   kubectl -n kafka-perf-test patch job kafka-baseline-spring -p '{"spec":{"suspend":false}}'
+   ```
+
+If you prefer to have the Job start immediately on install, set `--set suspend=false` (default).
+
+#### Collecting Artifacts
+
+Artifacts for both runners are saved under the mounted `artifacts/` path and can be collected from the pod or PVC after job completion:
+
+- **Inspect job logs**: `kubectl logs job/kafka-baseline-cli` or `kubectl logs job/kafka-baseline-spring`
+- **Copy artifacts from pod**: `kubectl cp kafka-perf-test/<pod-name>:/workspace/artifacts ./artifacts-k8s`
+- **Download from PVC**: If you mounted a PVC, access it through the storage class or copy files directly
+
+For more customization, update the respective `values.yaml` file or add more Helm CLI `--set` arguments as needed.
 
