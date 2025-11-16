@@ -78,13 +78,8 @@ deploy:
         kubectl create secret docker-registry $CI_REGISTRY_SECRET_NM --docker-server=$CI_REGISTRY_HOSTED  --docker-email=$CI_REGISTRY_USER_EMAIL --docker-username=$CI_REGISTRY_USER --docker-password=$CI_REGISTRY_PASSWORD --namespace=$TARGET_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -;
       fi
   script:
-    - if helm ls -n $TARGET_NAMESPACE | grep -q $TARGET_APP_NAME; then
-        echo "Upgrading the existing release...";
-        helm upgrade $TARGET_APP_NAME charts/kafka-perf-runner -n $TARGET_NAMESPACE --set image.repository=$CI_REGISTRY_IMAGE_CLI --set image.tag=$CI_COMMIT_TAG --set bootstrapServers=$KAFKA_BOOTSTRAP_SERVERS --set suspend=true;
-      else
-        echo "Installing a new release...";
-        helm install $TARGET_APP_NAME charts/kafka-perf-runner -n $TARGET_NAMESPACE --set image.repository=$CI_REGISTRY_IMAGE_CLI --set image.tag=$CI_COMMIT_TAG --set bootstrapServers=$KAFKA_BOOTSTRAP_SERVERS --set suspend=true;
-      fi
+    - echo "Applying release (upgrade --install)..."
+    - helm upgrade --install $TARGET_APP_NAME charts/kafka-perf-runner -n $TARGET_NAMESPACE --create-namespace --set image.repository=$CI_REGISTRY_IMAGE_CLI --set image.tag=$CI_COMMIT_TAG --set bootstrapServers=$KAFKA_BOOTSTRAP_SERVERS --set suspend=true
   rules:
     - if: $CI_COMMIT_TAG =~ /^v(?:\d+.){2}(?:\d+)$/
       allow_failure: false
